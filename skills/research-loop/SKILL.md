@@ -7,11 +7,21 @@ description: Run the Recursive-style automated AI research loop — propose → 
 
 One invocation of this skill executes **one full iteration** on one track. State lives on disk, never in conversation (per [deli-auto-research]: fresh session per iteration, zero interaction, log decisions instead of asking).
 
-## Prerequisites (first run only)
+## Step 0 — Readiness gate (EVERY invocation, before anything else)
 
-1. Workdir initialized via the **benchmark-harness** skill (`setup_benchmarks.sh`), and `.research-loop/executor.sh` configured by the user for their compute backend (local CPU/GPU, GKE, Modal, SSH, ...). The executor is a user decision — if it's missing or unsuited to the track (e.g. the 8-GPU speedrun on a CPU-only executor), report that and stop; never pick a backend yourself.
-2. A measured baseline in `baselines/<track>.json` — if missing, this iteration's job is to measure it (run the unmodified candidate, store the result via `score.py`), not to optimize.
-3. `state/task_spec.md` with: track, target metric, stop conditions (iteration budget, metric target, spend cap).
+```bash
+python3 "$SKILL_DIR/scripts/readiness.py" status <workdir>
+```
+
+This detects whether **research-loop-init** has completed for this workdir (experiment.yaml present, executor smoke-tested, baseline measured, config hashes unchanged since the trial).
+
+- **ready** → proceed to the iteration.
+- **not ready, interactive session** (a human is present) → invoke the **research-loop-init** skill now, complete it through the baseline phase, then continue with this iteration.
+- **not ready, unattended session** (headless `claude -p`, scheduled worker) → do NOT attempt init — it requires a human to unblock executor/auth issues. Append a `FAILED` finding containing the readiness reasons, bump `stale_count`, report, stop.
+
+The gate also catches config drift: if `experiment.yaml` or `executor.sh` changed after the trial, readiness reports `trial` — the smoke test must be repeated before more iterations. Never bypass the gate by writing `trial_report.json` yourself; only init stamps it.
+
+The executor is a user decision — if it's unsuited to the experiment (e.g. an 8-GPU run on a CPU-only executor), report that and stop; never pick a backend yourself.
 
 ## State files (extends deli-auto-research layout)
 
@@ -48,7 +58,7 @@ If `score.py` says `improved: true`, spawn the **experiment-validator** agent wi
 ## Loop mechanics
 
 - **Supervised:** `/loop` re-invokes this skill; self-pace at one iteration per wakeup.
-- **Unattended:** a scheduled agent runs `claude -p "/research-loop <workdir> <track>" --dangerously-skip-permissions` per iteration — fresh session each time; disk state is the only memory.
+- **Unattended:** the schedule created by **research-loop-init** (Phase D) fires a fresh `claude -p` session per iteration — disk state is the only memory. Its heartbeat job owns stall-restarts and teardown; this skill signals completion only by writing `status: "done"` to `progress.json` — it never edits scheduler config.
 - **Stall rule (deli):** `stale_count >= 3` → the proposer must be told to switch category entirely (see its category list); `stale_count >= 6` → switch track or stop and report.
 - **Stop when:** task_spec's iteration budget or metric target is hit, or the compute budget defined in task_spec is reached. Write a final summary to `state/summary.md`.
 

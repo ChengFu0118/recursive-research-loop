@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Training-track payload: run a training command under a wall-clock budget
+r"""Training-track payload: run a training command under a wall-clock budget
 and parse the metric from its logs. Backend-neutral — the executor decides
 where this runs; the training command decides how many devices it uses.
 
@@ -11,6 +11,10 @@ Examples:
   # NanoChat budget run (metric = best val BPB within the budget)
   train_and_parse.py --workdir candidates/nanochat --parse nanochat \
       --budget-sec 300 --seed 0 --cmd "python train.py --seed={seed}"
+
+  # Any user-defined experiment (metric from experiment.yaml's regex)
+  train_and_parse.py --workdir candidates/my-experiment --budget-sec 600 --seed 0 \
+      --cmd "python train.py --seed={seed}" --metric-regex "val_loss:([\d.]+)" --direction min
 
 VERIFY: entrypoint names and log formats against the cloned upstream repos
 before the first run — both repos evolve quickly.
@@ -43,11 +47,18 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--workdir", required=True)
     p.add_argument("--cmd", required=True, help="training command; {seed} is substituted")
-    p.add_argument("--parse", choices=["nanogpt", "nanochat"], required=True)
+    p.add_argument("--parse", choices=["nanogpt", "nanochat"], default=None,
+                   help="built-in track parser; omit to use --metric-regex")
+    p.add_argument("--metric-regex", default=None,
+                   help="generic mode: regex with group 1 = metric value, applied to run logs")
+    p.add_argument("--direction", choices=["min", "max"], default="min",
+                   help="generic mode: best matched value is the min or max")
     p.add_argument("--budget-sec", type=int, required=True)
     p.add_argument("--target-loss", type=float, default=3.28)
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
+    if not args.parse and not args.metric_regex:
+        p.error("either --parse or --metric-regex is required")
 
     cmd = shlex.split(args.cmd.format(seed=args.seed))
     t0 = time.monotonic()
@@ -60,13 +71,20 @@ def main() -> None:
         log = (exc.stdout or "") + (exc.stderr or "")
     elapsed = time.monotonic() - t0
 
-    parsed = (parse_nanogpt if args.parse == "nanogpt" else parse_nanochat)(
-        log, args.target_loss
-    )
-    if args.parse == "nanogpt":
-        metric = elapsed if parsed["correct"] else float("inf")
+    if args.parse:
+        parsed = (parse_nanogpt if args.parse == "nanogpt" else parse_nanochat)(
+            log, args.target_loss
+        )
+        if args.parse == "nanogpt":
+            metric = elapsed if parsed["correct"] else float("inf")
+        else:
+            metric = parsed["best_bpb"] if parsed["correct"] else float("inf")
     else:
-        metric = parsed["best_bpb"] if parsed["correct"] else float("inf")
+        values = [float(m.group(1)) for m in re.finditer(args.metric_regex, log)]
+        best = (min if args.direction == "min" else max)(values) if values else None
+        parsed = {"correct": bool(values), "best_value": best, "n_matches": len(values)}
+        # raw best value; score.py handles direction at aggregation time
+        metric = best if best is not None else float("inf")
 
     result = {
         "seed": args.seed,

@@ -41,7 +41,8 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 ### Skills
 
 **Research loop core**
-- `research-loop` — the Recursive-cycle orchestrator: one invocation = one propose → implement → run → validate → record iteration; drive with `/loop` (supervised) or a schedule (unattended)
+- `research-loop-init` — interactive onboarding, run once per experiment: interview → `experiment.yaml` (any user experiment, not just the built-in tracks), smoke-test the executor end-to-end (local/GCE/k8s/helm/Modal), measure the baseline, and optionally create the unattended schedule (worker cadence + heartbeat watchdog). Resumable; re-invoke to change cadence or tear down.
+- `research-loop` — the Recursive-cycle orchestrator: one invocation = one propose → implement → run → validate → record iteration; drive with `/loop` (supervised) or the schedule (unattended). **Gated**: every invocation runs the readiness detector first — if init hasn't completed (or config drifted since the trial), an interactive session routes into `research-loop-init` automatically; an unattended session fails fast with reasons.
 - `benchmark-harness` — backend-agnostic eval environments and scoring for the three tracks. Payloads (correctness/timing/log-parsing) are backend-neutral Python; **where they run is a user-defined executor** (`.research-loop/executor.sh`): local CPU/GPU by default, with GKE and Modal templates in `scripts/executors/`. `score.py` enforces multi-seed + noise-threshold promotion rules
 - `deli-auto-research` — long-horizon autonomous protocol: file-persisted state, heartbeat watchdog, stall detection, forced pivots
 - `experiment-design` — pre-registered hypothesis → execute → iterate → report loop
