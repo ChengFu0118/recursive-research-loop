@@ -9,7 +9,7 @@ One invocation of this skill executes **one full iteration** on one track. State
 
 ## Prerequisites (first run only)
 
-1. Workdir initialized via the **benchmark-harness** skill (`setup_benchmarks.sh`), Modal authenticated.
+1. Workdir initialized via the **benchmark-harness** skill (`setup_benchmarks.sh`), and `.research-loop/executor.sh` configured by the user for their compute backend (local CPU/GPU, GKE, Modal, SSH, ...). The executor is a user decision — if it's missing or unsuited to the track (e.g. the 8-GPU speedrun on a CPU-only executor), report that and stop; never pick a backend yourself.
 2. A measured baseline in `baselines/<track>.json` — if missing, this iteration's job is to measure it (run the unmodified candidate, store the result via `score.py`), not to optimize.
 3. `state/task_spec.md` with: track, target metric, stop conditions (iteration budget, metric target, spend cap).
 
@@ -35,7 +35,7 @@ Spawn the **idea-proposer** agent (Agent tool). It reads only `findings.jsonl` +
 Edit **only** `candidates/<track>/`. Keep the change minimal and single-hypothesis — one idea per iteration, or a REJECT teaches you nothing. Take a pre-edit snapshot: `git -C <workdir> diff` must later show the validator exactly what changed (init a throwaway git repo over candidates/ at setup if needed).
 
 ### 3. Run
-Submit via the benchmark-harness `modal_runner.py` entrypoint for the track, ≥3 seeds (1 seed acceptable for the 8-GPU speedrun; note it in the finding). Poll minute-level for the first 3 minutes — kill and record `FAILED` on import errors/OOM rather than waiting out the timeout. Aggregate with `score.py`.
+Submit the track's payload through `.research-loop/executor.sh` (see benchmark-harness for the exact commands), ≥3 seeds (1 seed acceptable for the multi-GPU speedrun; note it in the finding). Poll minute-level for the first 3 minutes — kill and record `FAILED` on import errors/OOM rather than waiting out the timeout. Aggregate with `score.py`.
 
 ### 4. Validate
 If `score.py` says `improved: true`, spawn the **experiment-validator** agent with: the candidate diff, `runs/<track>-<iter>.jsonl`, and `result.json`. It returns ACCEPT or REJECT with reasons. **Only ACCEPT promotes.** A REJECT for suspected reward hacking must be recorded verbatim in the finding.
@@ -50,7 +50,7 @@ If `score.py` says `improved: true`, spawn the **experiment-validator** agent wi
 - **Supervised:** `/loop` re-invokes this skill; self-pace at one iteration per wakeup.
 - **Unattended:** a scheduled agent runs `claude -p "/research-loop <workdir> <track>" --dangerously-skip-permissions` per iteration — fresh session each time; disk state is the only memory.
 - **Stall rule (deli):** `stale_count >= 3` → the proposer must be told to switch category entirely (see its category list); `stale_count >= 6` → switch track or stop and report.
-- **Stop when:** task_spec's iteration budget or metric target is hit, or spend cap reached. Write a final summary to `state/summary.md`.
+- **Stop when:** task_spec's iteration budget or metric target is hit, or the compute budget defined in task_spec is reached. Write a final summary to `state/summary.md`.
 
 ## Hard rules
 

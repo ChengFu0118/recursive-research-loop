@@ -2,8 +2,8 @@
 """PostToolUse check: fast syntax check on edited candidate code.
 
 Catches Python syntax errors immediately after an edit to candidate/kernel
-code, before a GPU run is submitted — a failed compile on Modal wastes minutes
-and money; py_compile here costs milliseconds.
+code, before a benchmark run is submitted — a failed compile on remote compute
+wastes minutes and money; py_compile here costs milliseconds.
 
 Only fires for .py files under candidate directories (candidates/, kernels/,
 submissions/) so a user-scope install stays quiet in unrelated projects.

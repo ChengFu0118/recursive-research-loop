@@ -29,5 +29,16 @@ cat > .research-loop/protected-paths.txt <<'EOF'
 (^|/)runs/
 EOF
 
-echo "OK: $WORKDIR ready. Next: 'modal token new' if needed, then run a baseline"
-echo "measurement for each track and store it in baselines/<track>.json."
+# Default executor = local python3. The user owns this file — replace it to
+# target other compute (see executors/gke.sh.example, modal.py.example).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f .research-loop/executor.sh ]; then
+  cp "$SCRIPT_DIR/executors/local.sh" .research-loop/executor.sh
+  chmod +x .research-loop/executor.sh
+fi
+
+echo "OK: $WORKDIR ready."
+echo "NEXT (user decision): review .research-loop/executor.sh — it defaults to"
+echo "local python3 (CPU/GPU). Replace it to run on your own compute (GKE, Modal,"
+echo "SSH, ...); templates in $SCRIPT_DIR/executors/. Then measure a baseline per"
+echo "track into baselines/<track>.json."

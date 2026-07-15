@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Example executor: run the payload as a Kubernetes Job on a GKE GPU node pool.
+# Copy to .research-loop/executor.sh and fill in the TODOs for your cluster.
+#
+# Assumes: gcloud + kubectl configured, an image with python3/torch/triton and
+# your benchmark deps pushed to Artifact Registry, and the workdir baked into
+# or mounted by that image (e.g. via a git clone in an initContainer or GCSFuse).
+set -euo pipefail
+
+PAYLOAD="$1"; shift
+IMAGE="us-docker.pkg.dev/TODO_PROJECT/research-loop/harness:latest"   # TODO
+GPU_TYPE="nvidia-tesla-t4"                                            # TODO: a100/h100 pool
+JOB="rl-$(basename "$PAYLOAD" .py)-$(date +%s)"
+
+kubectl create job "$JOB" --image="$IMAGE" -- \
+  python3 "/work/$PAYLOAD" "$@"
+# TODO for GPU scheduling, patch in resources + nodeSelector, e.g.:
+#   kubectl patch job "$JOB" --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/resources","value":{"limits":{"nvidia.com/gpu":1}}}]'
+
+kubectl wait --for=condition=complete "job/$JOB" --timeout=60m
+kubectl logs "job/$JOB"          # RESULT_JSON: lines flow back through stdout
+kubectl delete job "$JOB" --wait=false

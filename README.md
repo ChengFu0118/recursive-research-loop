@@ -42,7 +42,7 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 
 **Research loop core**
 - `research-loop` — the Recursive-cycle orchestrator: one invocation = one propose → implement → run → validate → record iteration; drive with `/loop` (supervised) or a schedule (unattended)
-- `benchmark-harness` — Modal-based eval environments and scoring for the three tracks (`setup_benchmarks.sh`, `modal_runner.py`, `score.py`); enforces multi-seed + noise-threshold promotion rules
+- `benchmark-harness` — backend-agnostic eval environments and scoring for the three tracks. Payloads (correctness/timing/log-parsing) are backend-neutral Python; **where they run is a user-defined executor** (`.research-loop/executor.sh`): local CPU/GPU by default, with GKE and Modal templates in `scripts/executors/`. `score.py` enforces multi-seed + noise-threshold promotion rules
 - `deli-auto-research` — long-horizon autonomous protocol: file-persisted state, heartbeat watchdog, stall detection, forced pivots
 - `experiment-design` — pre-registered hypothesis → execute → iterate → report loop
 - `call-api` — parallel Claude API fan-out with concurrency, retries, JSONL logging
@@ -57,7 +57,7 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 ### Hooks (active on install)
 
 - **`protect_eval.py` (PreToolUse)** — blocks any Edit/Write to the evaluation harness: `benchmarks/**/eval/**`, `benchmarks/**/reference/**`, `benchmarks/**/score_*.py`, plus any regexes you list in `.research-loop/protected-paths.txt` in the workdir. This is the structural anti-reward-hacking guard; it is enforced even under `--dangerously-skip-permissions`.
-- **`post_edit_check.py` (PostToolUse)** — instant `py_compile` syntax check on edited `.py` files under `candidates/`, `kernels/`, or `submissions/`, so broken code is caught in milliseconds instead of failing a paid GPU run on Modal.
+- **`post_edit_check.py` (PostToolUse)** — instant `py_compile` syntax check on edited `.py` files under `candidates/`, `kernels/`, or `submissions/`, so broken code is caught in milliseconds instead of failing a benchmark run on remote compute.
 
 Both hooks are scoped to loop-specific paths, so a user-scope install stays silent in unrelated projects. Escape hatch for harness development: `RESEARCH_LOOP_DISABLE_GUARDS=1`.
 
@@ -75,13 +75,19 @@ Both hooks are scoped to loop-specific paths, so a user-scope install stays sile
 ```bash
 mkdir ~/experiments/run1 && cd ~/experiments/run1
 bash <plugin>/skills/benchmark-harness/scripts/setup_benchmarks.sh .
-modal token new
+
+# YOU decide where experiments run. The default executor is local python3
+# (CPU, or local GPU if torch sees one). To use other compute, replace it:
+$EDITOR .research-loop/executor.sh   # templates: scripts/executors/{gke.sh.example,modal.py.example}
+
 claude --dangerously-skip-permissions   # then: "run the research loop on the kernels track"
 ```
 
+The executor is a one-file contract — `executor.sh <payload.py> [args...]`, run it where torch lives, stream stdout back — so any backend works: local machine, a GKE GPU node pool, Modal, SSH to a lab box. The agent never chooses or changes the backend; that's yours.
+
 ### Future work
 
-- Verify `modal_runner.py` entrypoints against current upstream repos (marked `# VERIFY:` inline)
+- Verify payload entrypoints/log formats against current upstream repos (marked `# VERIFY:` inline)
 - Full KernelBench problem-set import for the kernel track
 - Findings dashboard via `static-file-service`
 
@@ -113,7 +119,7 @@ so no `allow` list is needed — nothing prompts. What still matters is what **c
 - `Read(.env*)` keeps credentials out of the loop's context.
 - `Bash(git push:*)` keeps an unattended agent from publishing; review and push results yourself.
 
-**Isolation is your real safety boundary.** Skip-permissions removes all confirmation, so run the loop in a disposable environment: a container/VM, or at minimum a dedicated workdir + throwaway git clone, with a Modal token scoped to a sandbox workspace and a spend limit set in the Modal dashboard.
+**Isolation is your real safety boundary.** Skip-permissions removes all confirmation, so run the loop in a disposable environment: a container/VM, or at minimum a dedicated workdir + throwaway git clone. Scope the credentials your executor uses to a sandbox project/workspace (e.g. a dedicated GCP project or Modal workspace) and set spend limits on that backend.
 
 ## Design principles
 

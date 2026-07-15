@@ -1,27 +1,38 @@
 ---
 name: benchmark-harness
-description: Reproducible eval environments and scoring for the research-loop benchmark tracks — NanoGPT speedrun (wall-clock to fixed val loss), NanoChat 5-minute budget (BPB), and Triton kernel optimization (speedup vs reference). Invoke to set up benchmarks in a workdir, submit a candidate to Modal for scoring, or aggregate multi-seed results. Infrastructure called by the research-loop skill.
+description: Reproducible eval environments and scoring for the research-loop benchmark tracks — NanoGPT speedrun (wall-clock to fixed val loss), NanoChat 5-minute budget (BPB), and kernel optimization (speedup vs reference). Backend-agnostic — experiments run through a user-defined executor (local CPU/GPU, GKE, Modal, ...). Invoke to set up a workdir, run a candidate, or aggregate multi-seed results. Infrastructure called by the research-loop skill.
 user-invocable: false
 ---
 
 # Benchmark Harness
 
-Sets up and scores the three benchmark tracks. Everything runs on Modal (macOS host, remote NVIDIA GPUs). **All scoring goes through this harness — the loop never invents its own scoring.**
+Sets up and scores the three benchmark tracks. **All scoring goes through this harness — the loop never invents its own scoring.**
+
+The harness is split into two layers:
+
+- **Payloads** (`scripts/payloads/`) — backend-neutral Python that does the actual eval (correctness, timing, log parsing) and prints `RESULT_JSON:` lines. Owned by the harness.
+- **Executor** (`.research-loop/executor.sh` in the workdir) — decides *where* a payload runs. **Owned by the user.** Never assume a backend; if the executor isn't configured for the compute the task needs, say so and stop — don't substitute your own choice.
+
+## Executor contract
+
+```
+.research-loop/executor.sh <payload.py> [payload args...]
+```
+
+Requirements: run the payload in an environment with `python3` + `torch` (+ track deps), stream its stdout back unmodified, exit with the payload's exit code. That's all — so it can be `exec python3 "$@"` (local), a `kubectl create job` wrapper (GKE), a Modal function, SSH to a box, anything.
+
+Templates in `scripts/executors/`: `local.sh` (default, CPU or local GPU), `gke.sh.example` (Kubernetes Job on GKE), `modal.py.example`.
 
 ## Workdir layout (created by setup)
 
 ```
 workdir/
-├── benchmarks/            # pristine reference checkouts + eval code — READ-ONLY (hook-enforced)
-│   ├── modded-nanogpt/    # KellerJordan/modded-nanogpt
-│   ├── nanochat/          # karpathy/nanochat
-│   └── kernels/           # kernel problems: <id>/reference.py
+├── benchmarks/            # pristine references + eval code — READ-ONLY (hook-enforced)
 ├── candidates/            # the ONLY place the work agent edits
-│   ├── nanogpt/           # working copy of the training script
-│   ├── nanochat/
-│   └── kernels/           # <id>.py candidate kernels
 ├── baselines/             # <track>.json — current best accepted result
+├── runs/                  # raw multi-seed results per iteration
 └── .research-loop/
+    ├── executor.sh        # USER-DEFINED compute backend (default: local)
     └── protected-paths.txt
 ```
 
@@ -29,37 +40,37 @@ workdir/
 
 ```bash
 bash "$SKILL_DIR/scripts/setup_benchmarks.sh" <workdir>
-modal token new   # if not already authenticated
+# then the user reviews/replaces <workdir>/.research-loop/executor.sh for their compute
 ```
-
-The setup script clones the benchmark repos, copies editable baselines into `candidates/`, and writes `protected-paths.txt` extending the eval-protection hook to the whole `benchmarks/` tree.
 
 ## Running a candidate
 
-All entrypoints are in `scripts/modal_runner.py`:
-
 ```bash
-# Kernel track: correctness vs reference + timed speedup, one GPU
-modal run scripts/modal_runner.py::kernel_eval \
-  --problem-dir benchmarks/kernels/<id> --candidate candidates/kernels/<id>.py --seeds 3
+X=.research-loop/executor.sh
+P="$SKILL_DIR/scripts/payloads"
 
-# NanoGPT speedrun: 8xH100, wall-clock to target val loss
-modal run scripts/modal_runner.py::nanogpt_speedrun \
-  --candidate-dir candidates/nanogpt --target-loss 3.28
+# Kernel track
+"$X" "$P/kernel_eval.py" --reference benchmarks/kernels/<id>/reference.py \
+     --candidate candidates/kernels/<id>.py --seeds 3
 
-# NanoChat: fixed 5-minute budget, report BPB
-modal run scripts/modal_runner.py::nanochat_budget \
-  --candidate-dir candidates/nanochat --budget-sec 300
+# NanoGPT speedrun
+"$X" "$P/train_and_parse.py" --workdir candidates/nanogpt --parse nanogpt \
+     --target-loss 3.28 --budget-sec 3000 --seed 0 \
+     --cmd "torchrun --nproc_per_node=8 train_gpt.py --seed={seed}"
+
+# NanoChat budget
+"$X" "$P/train_and_parse.py" --workdir candidates/nanochat --parse nanochat \
+     --budget-sec 300 --seed 0 --cmd "python train.py --seed={seed}"
 ```
 
-Each run appends one JSON line to `runs/<track>-<iteration>.jsonl`. Poll minute-level right after submission — most failures (OOM, import error, shape mismatch) happen in the first two minutes; kill and fix rather than waiting out a dead run.
+Collect `RESULT_JSON:` lines from stdout into `runs/<track>-<iter>.jsonl` (strip the prefix). Poll early — most failures (import error, OOM, misconfigured executor) surface in the first minutes; kill and fix rather than waiting out a budget.
 
 ## Scoring contract
 
-`scripts/score.py` aggregates multi-seed runs and compares against the baseline:
+`scripts/score.py` aggregates multi-seed runs against the baseline:
 
 ```bash
-python3 scripts/score.py --runs runs/kernels-17.jsonl \
+python3 "$SKILL_DIR/scripts/score.py" --runs runs/kernels-17.jsonl \
   --baseline baselines/kernels.json --metric speedup --direction max
 ```
 
@@ -69,8 +80,10 @@ Rules enforced by the script — do not relax them:
 - any `correct: false` run → `improved: false`
 - improvement must exceed `max(1%, 1 std)` of baseline — noise is not progress
 
+Baselines and candidates are only comparable if measured through the **same executor on the same hardware** — changing the backend invalidates `baselines/`; re-measure.
+
 ## Hard rules
 
 1. **Never edit anything under `benchmarks/`** — the PreToolUse hook blocks it; a blocked edit means you were about to touch the harness, not that the hook is broken.
 2. **A result is not real until `score.py` says `improved: true` AND the experiment-validator agent returns ACCEPT.**
-3. Upstream repos move fast: at setup time, verify the training entrypoint names and log formats in the cloned repos and adjust the `# VERIFY:` lines in `modal_runner.py` before the first run.
+3. Upstream repos move fast: verify entrypoints and log formats marked `# VERIFY:` in the payloads before the first run.
