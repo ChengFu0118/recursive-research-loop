@@ -62,19 +62,33 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 
 ## Recommended settings
 
-Permissions can't ship inside a plugin. Add to your project or user `settings.json` in the workdir where experiments run:
+This plugin assumes the loop runs unattended with:
+
+```bash
+claude --dangerously-skip-permissions
+```
+
+so no `allow` list is needed — nothing prompts. What still matters is what **cannot** be bypassed: `permissions.deny` rules and PreToolUse hooks are enforced even in skip-permissions mode, and they are the only brakes on an autonomous run. Add to `settings.json` in the experiment workdir:
 
 ```json
 {
   "permissions": {
-    "allow": [
-      "Bash(modal run:*)",
-      "Bash(modal deploy:*)",
-      "Bash(python3 scripts/*:*)"
+    "deny": [
+      "Edit(benchmarks/**/eval/**)",
+      "Edit(**/score_*.py)",
+      "Write(benchmarks/**/eval/**)",
+      "Read(.env*)",
+      "Bash(git push:*)"
     ]
   }
 }
 ```
+
+- The `Edit`/`Write` denies keep the work agent from touching scoring scripts and reference implementations — the structural anti-reward-hacking guardrail (the planned PreToolUse hook adds a second, smarter layer).
+- `Read(.env*)` keeps credentials out of the loop's context.
+- `Bash(git push:*)` keeps an unattended agent from publishing; review and push results yourself.
+
+**Isolation is your real safety boundary.** Skip-permissions removes all confirmation, so run the loop in a disposable environment: a container/VM, or at minimum a dedicated workdir + throwaway git clone, with a Modal token scoped to a sandbox workspace and a spend limit set in the Modal dashboard.
 
 ## Design principles
 
