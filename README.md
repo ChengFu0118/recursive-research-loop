@@ -18,7 +18,19 @@ Target benchmark tracks:
 /plugin install recursive-research-loop@recursive-research-loop
 ```
 
-For local development, point the marketplace at your checkout instead:
+### From the terminal (local clone)
+
+If you've cloned the repo and have Claude Code installed, install it without entering an interactive session:
+
+```bash
+git clone https://github.com/ChengFu0118/recursive-research-loop.git "$GIT_ROOT/recursive-research-loop"
+claude plugin marketplace add "$GIT_ROOT/recursive-research-loop"
+claude plugin install recursive-research-loop@recursive-research-loop
+```
+
+This installs at **user scope** (available in every project). Use `-s project` to scope it to the current project instead, and `claude plugin list` to confirm. Since the marketplace points at your local checkout, `git pull` + `claude plugin update recursive-research-loop` picks up new versions.
+
+For iterating on the plugin itself, the same local-path marketplace works from inside a session:
 
 ```bash
 /plugin marketplace add /path/to/recursive-research-loop
