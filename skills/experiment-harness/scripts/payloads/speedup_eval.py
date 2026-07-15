@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Kernel-track payload: correctness vs reference + timed speedup.
+"""Speedup payload: correctness vs a reference implementation + timed speedup.
+
+For any function-vs-reference experiment — GPU kernels, data transforms, any
+drop-in replacement where the candidate must produce the same output faster.
 
 Backend-neutral: runs wherever python3 + torch exist (local CPU, local GPU,
 a GKE pod, a Modal function, ...). The executor's only job is to run this

@@ -1,14 +1,10 @@
 # recursive-research-loop
 
-A Claude Code plugin for running a **Recursive-style automated AI research loop** — propose → implement → run → validate → learn — on optimization benchmarks, inspired by [First Steps Toward Automated AI Research](https://www.recursive.com/articles/first-steps-toward-automated-ai-research).
+A Claude Code plugin for running a **Recursive-style automated AI research loop** — propose → implement → run → validate → learn — on **any user-defined experiment**: an "optimize a metric" task described in one yaml file. Training runs, GPU kernels, data pipelines, inference latency — if a command produces a number in its logs, the loop can iterate on it. Inspired by [First Steps Toward Automated AI Research](https://www.recursive.com/articles/first-steps-toward-automated-ai-research).
 
-Target benchmark tracks:
+You bring: a repo/script to optimize, a metric (log regex + direction), and a compute backend (a one-file executor: local, GKE, Modal, SSH, ...). The loop brings: hypothesis generation, implementation, multi-seed scoring, independent validation, and anti-reward-hacking guardrails.
 
-| Track | Task | Metric |
-|---|---|---|
-| NanoGPT speedrun | Train to fixed 3.28 val loss as fast as possible | Wall-clock time |
-| NanoChat autoresearch | Minimize val loss in a 5-minute GPU budget | Bits per byte (BPB) |
-| GPU kernel optimization | Optimize kernels toward hardware limits (KernelBench-style) | Speed-of-Light ratio |
+Benchmarking the plugin itself (standard public benchmark suites, leaderboards, loop-quality reports) lives in a separate repo: `benchmark-autoresearch`.
 
 ## Install
 
@@ -41,9 +37,9 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 ### Skills
 
 **Research loop core**
-- `research-loop-init` — interactive onboarding, run once per experiment: interview → `experiment.yaml` (any user experiment, not just the built-in tracks), smoke-test the executor end-to-end (local/GCE/k8s/helm/Modal), measure the baseline, and optionally create the unattended schedule (worker cadence + heartbeat watchdog). Resumable; re-invoke to change cadence or tear down.
+- `research-loop-init` — interactive onboarding, run once per experiment: interview → `experiment.yaml`, smoke-test the executor end-to-end (local/GCE/k8s/helm/Modal), measure the baseline, and optionally create the unattended schedule (worker cadence + heartbeat watchdog). Resumable; re-invoke to change cadence or tear down.
 - `research-loop` — the Recursive-cycle orchestrator: one invocation = one propose → implement → run → validate → record iteration; drive with `/loop` (supervised) or the schedule (unattended). **Gated**: every invocation runs the readiness detector first — if init hasn't completed (or config drifted since the trial), an interactive session routes into `research-loop-init` automatically; an unattended session fails fast with reasons.
-- `benchmark-harness` — backend-agnostic eval environments and scoring for the three tracks. Payloads (correctness/timing/log-parsing) are backend-neutral Python; **where they run is a user-defined executor** (`.research-loop/executor.sh`): local CPU/GPU by default, with GKE and Modal templates in `scripts/executors/`. `score.py` enforces multi-seed + noise-threshold promotion rules
+- `experiment-harness` — runs and scores the user's experiment. Payloads (run-under-budget + metric extraction, or function-vs-reference speedup) are backend-neutral Python; **where they run is a user-defined executor** (`.research-loop/executor.sh`): local CPU/GPU by default, with GKE and Modal templates in `scripts/executors/`. `score.py` enforces multi-seed + noise-threshold promotion rules
 - `deli-auto-research` — long-horizon autonomous protocol: file-persisted state, heartbeat watchdog, stall detection, forced pivots
 - `experiment-design` — pre-registered hypothesis → execute → iterate → report loop
 - `call-api` — parallel Claude API fan-out with concurrency, retries, JSONL logging
@@ -57,8 +53,8 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 
 ### Hooks (active on install)
 
-- **`protect_eval.py` (PreToolUse)** — blocks any Edit/Write to the evaluation harness: `benchmarks/**/eval/**`, `benchmarks/**/reference/**`, `benchmarks/**/score_*.py`, plus any regexes you list in `.research-loop/protected-paths.txt` in the workdir. This is the structural anti-reward-hacking guard; it is enforced even under `--dangerously-skip-permissions`.
-- **`post_edit_check.py` (PostToolUse)** — instant `py_compile` syntax check on edited `.py` files under `candidates/`, `kernels/`, or `submissions/`, so broken code is caught in milliseconds instead of failing a benchmark run on remote compute.
+- **`protect_eval.py` (PreToolUse)** — blocks any Edit/Write to protected paths. The real configuration is per-workdir: `setup_workdir.sh` writes `.research-loop/protected-paths.txt` protecting `reference/`, `baselines/`, and `runs/`, and init appends the experiment's own `protected:` entries. This is the structural anti-reward-hacking guard; it is enforced even under `--dangerously-skip-permissions`.
+- **`post_edit_check.py` (PostToolUse)** — instant `py_compile` syntax check on edited `.py` files under `candidates/`, `kernels/`, or `submissions/`, so broken code is caught in milliseconds instead of failing an experiment run on remote compute.
 
 Both hooks are scoped to loop-specific paths, so a user-scope install stays silent in unrelated projects. Escape hatch for harness development: `RESEARCH_LOOP_DISABLE_GUARDS=1`.
 
@@ -69,27 +65,29 @@ Both hooks are scoped to loop-specific paths, so a user-scope install stays sile
 
 ### MCP servers
 
-- `context7` — live Triton / CUDA / PyTorch documentation lookup (the innovation surface of all three tracks moves faster than model training data)
+- `context7` — live documentation lookup for fast-moving libraries (Triton, CUDA, PyTorch, ...) during the implementation phase
 
 ### Getting started with a loop
 
 ```bash
-mkdir ~/experiments/run1 && cd ~/experiments/run1
-bash <plugin>/skills/benchmark-harness/scripts/setup_benchmarks.sh .
+mkdir -p ~/experiments/run1
+bash <plugin>/skills/experiment-harness/scripts/setup_workdir.sh ~/experiments/run1 <your-experiment-git-url> myexp
+cd ~/experiments/run1
 
-# YOU decide where experiments run. The default executor is local python3
-# (CPU, or local GPU if torch sees one). To use other compute, replace it:
+# YOU decide where experiments run. The default executor is local python3.
+# To use other compute, replace it:
 $EDITOR .research-loop/executor.sh   # templates: scripts/executors/{gke.sh.example,modal.py.example}
 
-claude --dangerously-skip-permissions   # then: "run the research loop on the kernels track"
+claude   # then: "use research-loop-init to onboard my experiment"
 ```
 
-The executor is a one-file contract — `executor.sh <payload.py> [args...]`, run it where torch lives, stream stdout back — so any backend works: local machine, a GKE GPU node pool, Modal, SSH to a lab box. The agent never chooses or changes the backend; that's yours.
+Init interviews you into an `experiment.yaml`, smoke-tests the executor until one valid result comes back, measures the baseline, and (only if you say yes) creates the unattended schedule. After that, one prompt runs an iteration — or the schedule runs them for you.
+
+The executor is a one-file contract — `executor.sh <payload.py> [args...]`, run it where the experiment's deps live, stream stdout back — so any backend works: local machine, a GKE GPU node pool, Modal, SSH to a lab box. The agent never chooses or changes the backend; that's yours.
 
 ### Future work
 
-- Verify payload entrypoints/log formats against current upstream repos (marked `# VERIFY:` inline)
-- Full KernelBench problem-set import for the kernel track
+- Sync the harness with the `benchmark-autoresearch` companion repo (single source of truth)
 - Findings dashboard via `static-file-service`
 
 ## Recommended settings
@@ -106,9 +104,9 @@ so no `allow` list is needed — nothing prompts. What still matters is what **c
 {
   "permissions": {
     "deny": [
-      "Edit(benchmarks/**/eval/**)",
+      "Edit(reference/**)",
+      "Write(reference/**)",
       "Edit(**/score_*.py)",
-      "Write(benchmarks/**/eval/**)",
       "Read(.env*)",
       "Bash(git push:*)"
     ]
@@ -125,6 +123,6 @@ so no `allow` list is needed — nothing prompts. What still matters is what **c
 ## Design principles
 
 - **Separate execution from evaluation** — the agent that writes candidate code never scores it.
-- **State lives in the experiment workdir**, not this repo: `state/`, `findings.jsonl`, `directions_tried.json`, benchmark checkouts.
+- **State lives in the experiment workdir**, not this repo: `state/`, `findings.jsonl`, `directions_tried.json`, experiment checkouts.
 - **Fresh session per iteration** — never rely on conversation resume; inject curated state from disk.
 - **Guard the harness** — scoring scripts and reference implementations are read-only to the work agent.

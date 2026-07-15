@@ -1,0 +1,42 @@
+"""Example executor: run a payload on Modal serverless GPUs.
+
+Copy and adapt, then point .research-loop/executor.sh at it:
+
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec modal run /path/to/modal_executor.py --payload "$1" --args "${*:2}"
+
+TODO for training experiments: the payload runs commands inside the candidate
+directory, so ship that directory into the container too (modal.Mount or a
+git clone in the image) and pass --workdir accordingly.
+"""
+
+import shlex
+import subprocess
+import sys
+
+import modal
+
+app = modal.App("research-loop-executor")
+
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install("torch", "numpy")  # TODO: your experiment's deps
+    .apt_install("git")
+)
+
+
+@app.function(image=image, gpu="H100", timeout=3600)  # TODO: GPU type/count
+def run_payload(payload_src: str, args: list[str]) -> str:
+    path = "/tmp/payload.py"
+    open(path, "w").write(payload_src)
+    proc = subprocess.run(
+        [sys.executable, path, *args], capture_output=True, text=True
+    )
+    return proc.stdout + proc.stderr
+
+
+@app.local_entrypoint()
+def main(payload: str, args: str = ""):
+    out = run_payload.remote(open(payload).read(), shlex.split(args))
+    print(out)  # RESULT_JSON: lines flow back through stdout

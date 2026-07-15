@@ -19,7 +19,7 @@ Jump to the first incomplete phase (`phase_needed`): `interview` → A, `trial` 
 
 ## Phase A — Interview → `experiment.yaml`
 
-If the workdir doesn't exist yet, run the benchmark-harness `setup_benchmarks.sh` first (skip the clones for a custom experiment). Then capture the user's experiment as data:
+If the workdir doesn't exist yet, run the experiment-harness setup first — `setup_workdir.sh <workdir> [<git-url> <name>]` clones the experiment's repo into read-only `reference/<name>` and copies it to editable `candidates/<name>`. Then capture the user's experiment as data:
 
 ```yaml
 name: my-experiment
@@ -27,25 +27,27 @@ run_cmd: "python train.py --seed={seed}"   # anything: torchrun, helm install + 
 metric:
   name: val_loss
   regex: "val_loss:([\\d.]+)"              # group 1 = the value, matched against run logs
-  direction: min                            # min | max; best match in the log wins
+  direction: min                            # min | max
+  mode: best                                # best | time-to-target
+  # target: 3.28                            # required for time-to-target
 budget_sec: 600                             # hard wall-clock cap per run
 seeds: 3                                    # promotion requires >=3 (score.py enforces)
 editable: candidates/my-experiment/         # the ONLY paths the loop may modify
 protected: []                               # extra regexes appended to .research-loop/protected-paths.txt
 ```
 
-- The three built-in tracks are presets of this schema (nanogpt: `direction: min` on wall-clock with target loss; nanochat: `val bpb`; kernels: use the `kernel_eval.py` payload instead).
+- Two metric modes cover most experiments: `mode: best` (best regex value in the log) and `mode: time-to-target` (+ `target:` — wall-clock seconds until the value reaches it). Function-vs-reference experiments (kernels, drop-in replacements) use the `speedup_eval.py` payload instead.
 - Ask only what can't be inferred: look at the experiment's repo/scripts first, propose the yaml, let the user correct it.
-- Append `protected` entries to `.research-loop/protected-paths.txt` (anti-reward-hack hook), and confirm the executor: `.research-loop/executor.sh` must run a payload where the experiment's deps live. GKE/Modal templates: benchmark-harness `scripts/executors/`.
+- Append `protected` entries to `.research-loop/protected-paths.txt` (anti-reward-hack hook), and confirm the executor: `.research-loop/executor.sh` must run a payload where the experiment's deps live. GKE/Modal templates: experiment-harness `scripts/executors/`.
 
 ## Phase B — Smoke test (unblock everything, once)
 
 Run **one seed** end-to-end through the executor:
 
 ```bash
-.research-loop/executor.sh "$PAYLOADS/train_and_parse.py" --workdir <editable-dir> \
+.research-loop/executor.sh "$PAYLOADS/run_and_parse.py" --workdir <editable-dir> \
   --cmd "<run_cmd>" --budget-sec <budget> --seed 0 \
-  --metric-regex "<regex>" --direction <min|max>
+  --metric-regex "<regex>" --direction <min|max> --mode <best|time-to-target>
 ```
 
 Iterate **with the user** until one valid `RESULT_JSON` line with `correct: true` comes back. Typical blockers, in the order they usually appear: executor auth (gcloud login, kubeconfig, modal token) → image/deps missing (torch, experiment requirements) → quota/GPU availability → wrong entrypoint → metric regex matches nothing (fix the regex against the real log, show the user). Time the run.
