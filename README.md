@@ -52,13 +52,19 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 - `scientific-paper-writing` — top-level orchestrator
 - `literature-survey`, `paper-structure-and-logic`, `academic-figures-and-tables`, `peer-review-simulation`
 
+### Hooks (active on install)
+
+- **`protect_eval.py` (PreToolUse)** — blocks any Edit/Write to the evaluation harness: `benchmarks/**/eval/**`, `benchmarks/**/reference/**`, `benchmarks/**/score_*.py`, plus any regexes you list in `.research-loop/protected-paths.txt` in the workdir. This is the structural anti-reward-hacking guard; it is enforced even under `--dangerously-skip-permissions`.
+- **`post_edit_check.py` (PostToolUse)** — instant `py_compile` syntax check on edited `.py` files under `candidates/`, `kernels/`, or `submissions/`, so broken code is caught in milliseconds instead of failing a paid GPU run on Modal.
+
+Both hooks are scoped to loop-specific paths, so a user-scope install stays silent in unrelated projects. Escape hatch for harness development: `RESEARCH_LOOP_DISABLE_GUARDS=1`.
+
 ### Planned (see roadmap)
 
 - `research-loop` skill — the Recursive-cycle orchestrator (propose/implement/run/validate/record)
 - `benchmark-harness` skill — Modal-based reproducible eval environments for the three tracks
 - `experiment-validator` agent — independent reward-hacking and correctness auditor (read-only tools)
 - `idea-proposer` agent — diversity-enforced hypothesis generation
-- Eval-protection hook — PreToolUse block on edits to scoring/reference files
 
 ## Recommended settings
 

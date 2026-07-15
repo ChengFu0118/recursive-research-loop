@@ -1,5 +1,6 @@
 {
   "name": "recursive-research-loop",
+  "description": "Marketplace for the recursive-research-loop plugin: automated AI research loop for GPU kernel and LLM training optimization benchmarks.",
   "owner": {
     "name": "Cheng Fu",
     "url": "https://github.com/ChengFu0118"
