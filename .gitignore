@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.DS_Store
+.remember/
+.claude/settings.local.json
+
+# Experiment state lives in workdirs, not in the plugin repo
+state/
+logs/
+findings.jsonl

@@ -1,0 +1,14 @@
+{
+  "name": "recursive-research-loop",
+  "owner": {
+    "name": "Cheng Fu",
+    "url": "https://github.com/ChengFu0118"
+  },
+  "plugins": [
+    {
+      "name": "recursive-research-loop",
+      "source": ".",
+      "description": "Automated AI research loop for GPU/TPU kernel and LLM training optimization benchmarks."
+    }
+  ]
+}
