@@ -1,6 +1,6 @@
 {
   "name": "recursive-research-loop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Recursive-style automated AI research loop for optimization benchmarks (NanoGPT speedrun, NanoChat training efficiency, GPU kernel optimization) — long-horizon autonomous loop protocol, experiment design, and supporting research skills.",
   "author": {
     "name": "Cheng Fu",

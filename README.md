@@ -41,6 +41,8 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 ### Skills
 
 **Research loop core**
+- `research-loop` — the Recursive-cycle orchestrator: one invocation = one propose → implement → run → validate → record iteration; drive with `/loop` (supervised) or a schedule (unattended)
+- `benchmark-harness` — Modal-based eval environments and scoring for the three tracks (`setup_benchmarks.sh`, `modal_runner.py`, `score.py`); enforces multi-seed + noise-threshold promotion rules
 - `deli-auto-research` — long-horizon autonomous protocol: file-persisted state, heartbeat watchdog, stall detection, forced pivots
 - `experiment-design` — pre-registered hypothesis → execute → iterate → report loop
 - `call-api` — parallel Claude API fan-out with concurrency, retries, JSONL logging
@@ -59,12 +61,29 @@ For iterating on the plugin itself, the same local-path marketplace works from i
 
 Both hooks are scoped to loop-specific paths, so a user-scope install stays silent in unrelated projects. Escape hatch for harness development: `RESEARCH_LOOP_DISABLE_GUARDS=1`.
 
-### Planned (see roadmap)
+### Agents
 
-- `research-loop` skill — the Recursive-cycle orchestrator (propose/implement/run/validate/record)
-- `benchmark-harness` skill — Modal-based reproducible eval environments for the three tracks
-- `experiment-validator` agent — independent reward-hacking and correctness auditor (read-only tools)
-- `idea-proposer` agent — diversity-enforced hypothesis generation
+- `experiment-validator` — independent auditor (read-only tools): verifies stats from raw runs, screens the candidate diff for reward-hacking patterns, demands a plausible mechanism; only its ACCEPT promotes a result to baseline
+- `idea-proposer` — fresh-context hypothesis generator: 5 ranked directions per iteration, forced category spread, no mechanism-level repeats, builds on accepted wins
+
+### MCP servers
+
+- `context7` — live Triton / CUDA / PyTorch documentation lookup (the innovation surface of all three tracks moves faster than model training data)
+
+### Getting started with a loop
+
+```bash
+mkdir ~/experiments/run1 && cd ~/experiments/run1
+bash <plugin>/skills/benchmark-harness/scripts/setup_benchmarks.sh .
+modal token new
+claude --dangerously-skip-permissions   # then: "run the research loop on the kernels track"
+```
+
+### Future work
+
+- Verify `modal_runner.py` entrypoints against current upstream repos (marked `# VERIFY:` inline)
+- Full KernelBench problem-set import for the kernel track
+- Findings dashboard via `static-file-service`
 
 ## Recommended settings
 
